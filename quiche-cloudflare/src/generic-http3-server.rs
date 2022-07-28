@@ -46,7 +46,7 @@ struct PartialResponse {
 }
 
 struct Client {
-    conn: std::pin::Pin<Box<quiche::Connection>>,
+    conn: quiche::Connection,
 
     http3_conn: Option<quiche::h3::Connection>,
 
@@ -68,7 +68,7 @@ Options:
   -h --help                 Show this screen.
 ";
 
-const MAX_REQUEST_SIZE: usize = 5000000000;
+const MAX_REQUEST_SIZE: usize = 50000000000;
 
 fn main() {
     let mut buf = [0; 65535];
@@ -144,6 +144,8 @@ fn main() {
         ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &rng).unwrap();
 
     let mut clients = ClientMap::new();
+
+    let local_addr = socket.local_addr().unwrap();
 
     let mut total_read_bytes = 0;
 
@@ -294,9 +296,14 @@ fn main() {
 
                 debug!("New connection: dcid={:?} scid={:?}", hdr.dcid, scid);
 
-                let conn =
-                    quiche::accept(&scid, odcid.as_ref(), from, &mut config)
-                        .unwrap();
+                let conn = quiche::accept(
+                    &scid,
+                    odcid.as_ref(),
+                    local_addr,
+                    from,
+                    &mut config,
+                )
+                .unwrap();
 
                 let client = Client {
                     conn,
@@ -315,7 +322,10 @@ fn main() {
                 }
             };
 
-            let recv_info = quiche::RecvInfo { from };
+            let recv_info = quiche::RecvInfo {
+                to: socket.local_addr().unwrap(),
+                from,
+            };
 
             // Process potentially coalesced packets.
             let read = match client.conn.recv(pkt_buf, recv_info) {
@@ -418,6 +428,11 @@ fn main() {
                         Ok((_stream_id, quiche::h3::Event::Reset { .. })) => (),
 
                         Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
+
+                        Ok((
+                            _prioritized_element_id,
+                            quiche::h3::Event::PriorityUpdate,
+                        )) => (),
 
                         Ok((_goaway_id, quiche::h3::Event::GoAway)) => (),
 

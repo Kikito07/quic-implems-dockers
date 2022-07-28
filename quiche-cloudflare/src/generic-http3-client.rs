@@ -34,7 +34,7 @@ use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
-const MAX_REQUEST_SIZE: usize = 5000000000;
+const MAX_REQUEST_SIZE: usize = 50000000000;
 
 
 const USAGE: &str = "Usage:
@@ -151,8 +151,9 @@ fn main() {
     let scid = quiche::ConnectionId::from_ref(&scid);
 
     // Create a QUIC connection and initiate handshake.
+    let local_addr = socket.local_addr().unwrap();
     let mut conn =
-        quiche::connect(url.domain(), &scid, peer_addr, &mut config).unwrap();
+        quiche::connect(url.domain(), &scid, local_addr,peer_addr, &mut config).unwrap();
 
 
     if let Some(keylog) = &keylog {
@@ -256,7 +257,10 @@ fn main() {
 
             debug!("got {} bytes", len);
 
-            let recv_info = quiche::RecvInfo { from };
+            let recv_info = quiche::RecvInfo {
+                to: local_addr,
+                from,
+            };
 
             // Process potentially coalesced packets.
             let read = match conn.recv(&mut buf[..len], recv_info) {
@@ -364,6 +368,8 @@ fn main() {
 
                     Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
 
+                    Ok((_, quiche::h3::Event::PriorityUpdate)) => unreachable!(),
+
                     Ok((goaway_id, quiche::h3::Event::GoAway)) => {
                         info!("GOAWAY id={}", goaway_id);
                     },
@@ -419,7 +425,8 @@ fn main() {
     }
     println!("got {} bytes in total", total_bytes);
     println!("{} ms", (elapsed as f64)/1000.0);
-    println!("done");
+    println!("goodput : {} Mbps", ((total_bytes as f64) * 8.0)/((elapsed as f64)));
+    println!("done!!!");
 }
 
 fn hex_dump(buf: &[u8]) -> String {
